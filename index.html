@@ -1,0 +1,721 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>NDC Vertex Picker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: wide plotting canvas with a floating toolbar, and a tabbed control rail (Build, Colors, Vertices, Code). Stacks on phones. */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --panel2:#f5f7f9; --fg:#101a24; --muted:#586674; --line:#d6dde4;
+  --accent:#4f46e5; --accent-fg:#ffffff; --grid:#e3e8ed; --grid-major:#c9d2da; --edge:rgba(16,26,36,.55);
+  --axis-x:#d9480f; --axis-y:#2b8a3e; --axis-z:#1c64f2; --ndc:#4f46e5; --vert:#101a24; --sel:#e8590c; --bad:#c92a2a;
+  --f-display:"Space Grotesk",system-ui,sans-serif; --f-body:"Inter",system-ui,sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b1016; --panel:#121a23; --panel2:#18222d; --fg:#e6edf4; --muted:#8a99a8; --line:#273441;
+  --accent:#8b8cff; --accent-fg:#0b1016; --grid:#18222d; --grid-major:#263443; --edge:rgba(230,237,244,.6);
+  --axis-x:#ff9b5e; --axis-y:#69db7c; --axis-z:#74a7ff; --ndc:#8b8cff; --vert:#e6edf4; --sel:#ffa94d; --bad:#ff8787; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0b1016; --panel:#121a23; --panel2:#18222d; --fg:#e6edf4; --muted:#8a99a8; --line:#273441;
+  --accent:#8b8cff; --accent-fg:#0b1016; --grid:#18222d; --grid-major:#263443; --edge:rgba(230,237,244,.6);
+  --axis-x:#ff9b5e; --axis-y:#69db7c; --axis-z:#74a7ff; --ndc:#8b8cff; --vert:#e6edf4; --sel:#ffa94d; --bad:#ff8787; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--f-body);
+  padding-block:14px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font:700 21px/1 var(--f-display);margin:0;letter-spacing:-.01em}
+h2{font:600 11px/1 var(--f-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;margin-bottom:12px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand svg{flex:none}
+.brand p{margin:3px 0 0;color:var(--muted);font-size:13px}
+.app{display:grid;grid-template-columns:minmax(0,1fr) 370px;gap:14px;align-items:start}
+@media (max-width:960px){.app{grid-template-columns:minmax(0,1fr)}}
+.stage{display:flex;flex-direction:column;gap:8px;min-width:0}
+.canvaswrap{position:relative;height:min(78vh,780px);min-height:360px;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+canvas{width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+.tools{position:absolute;left:10px;top:10px;right:10px;display:flex;flex-wrap:wrap;gap:6px;pointer-events:none}
+.tools>*{pointer-events:auto}
+.tools .grp{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.12)}
+.tools button{border:0;border-radius:0;background:transparent;padding:6px 10px;font-size:12.5px;border-right:1px solid var(--line)}
+.tools button:last-child{border-right:0}
+.tools button:disabled{opacity:.4;cursor:default}
+.tag{position:absolute;left:10px;bottom:10px;font:12px var(--f-mono);color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+.toast{position:absolute;right:10px;bottom:10px;background:var(--fg);color:var(--bg);padding:5px 11px;border-radius:6px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+.readout{display:flex;flex-wrap:wrap;gap:4px 22px;font:13px var(--f-mono);padding:0 2px}
+.readout b{font:600 10.5px var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:6px}
+.hint{color:var(--muted);font-size:12px;margin:0}
+kbd{font:11px var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--panel)}
+.rail{background:var(--panel);border:1px solid var(--line);border-radius:10px;min-width:0;overflow:hidden}
+.tabs{display:flex;border-bottom:1px solid var(--line);background:var(--panel2)}
+.tabs button{flex:1;border:0;border-radius:0;background:transparent;padding:10px 6px;font-weight:600;font-size:13px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button.on{color:var(--fg);border-bottom-color:var(--accent);background:var(--panel)}
+.tab{padding:14px;display:flex;flex-direction:column;gap:16px}
+.tab[hidden]{display:none}
+.sec{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+label{display:flex;align-items:center;gap:6px;font-size:13px}
+button,select,textarea,input[type=text],input[type=number]{font:inherit;color:var(--fg);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 9px}
+button{cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent)}
+button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+button.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+button:focus-visible,select:focus-visible,textarea:focus-visible,input:focus-visible,canvas:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.seg{display:inline-flex}
+.seg button{border-radius:0;margin-left:-1px}
+.seg button:first-child{border-radius:6px 0 0 6px;margin-left:0}
+.seg button:last-child{border-radius:0 6px 6px 0}
+textarea{width:100%;font:12px/1.55 var(--f-mono);resize:vertical;min-height:130px;white-space:pre}
+input[type=text]{width:100%;font-family:var(--f-mono);font-size:12.5px}
+input[type=color]{width:34px;height:30px;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--panel2);cursor:pointer;flex:none}
+input[type=checkbox]{accent-color:var(--accent)}
+.note{font-size:12px;color:var(--muted);margin:0}
+.msg{font-size:12.5px;margin:0;min-height:1.2em}
+.msg.bad{color:var(--bad)}
+.presets{display:flex;flex-wrap:wrap;gap:6px}
+.presets button{width:26px;height:26px;padding:0;border-radius:50%;border:2px solid var(--panel)}
+.clist{display:flex;flex-direction:column;gap:6px;max-height:min(46vh,420px);overflow:auto;padding-right:2px}
+.crow{display:grid;grid-template-columns:auto 38px minmax(0,1fr) auto;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);cursor:pointer}
+.crow.sel{border-color:var(--sel);box-shadow:0 0 0 1px var(--sel)}
+.crow .chip{width:22px;height:22px;border-radius:5px;border:1px solid var(--edge)}
+.crow .cid{font:600 12px var(--f-mono)}
+.crow .cid small{display:block;font:400 10px var(--f-mono);color:var(--muted)}
+.crow input[type=text]{padding:4px 7px}
+.crow input.bad{border-color:var(--bad)}
+.tablewrap{max-height:min(46vh,420px);overflow:auto;border:1px solid var(--line);border-radius:8px}
+table{width:100%;border-collapse:collapse;font:12px var(--f-mono);font-variant-numeric:tabular-nums}
+th,td{padding:3px 6px;text-align:right;border-bottom:1px solid var(--line)}
+th{position:sticky;top:0;background:var(--panel2);color:var(--muted);font-weight:500;z-index:1}
+td input{width:62px;padding:2px 4px;font:12px var(--f-mono);text-align:right}
+tr.sel td{background:color-mix(in srgb,var(--sel) 16%,transparent)}
+tbody tr{cursor:pointer}
+td button{padding:0 6px;border:0;background:none;color:var(--muted)}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--edge);vertical-align:-1px;margin-right:4px}
+</style>
+
+<header>
+  <div class="brand">
+    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="1" y="1" width="32" height="32" rx="8" fill="var(--accent)"/><path d="M8 24 L17 8 L26 24 Z" fill="none" stroke="var(--accent-fg)" stroke-width="2" stroke-linejoin="round"/><circle cx="8" cy="24" r="2.6" fill="var(--accent-fg)"/><circle cx="17" cy="8" r="2.6" fill="var(--accent-fg)"/><circle cx="26" cy="24" r="2.6" fill="var(--accent-fg)"/></svg>
+    <div><h1>NDC Vertex Picker</h1><p>Place vertices, set a color per triangle, paste or export OpenGL arrays.</p></div>
+  </div>
+  <div class="seg" role="group" aria-label="Dimensions"><button id="m2d" class="on" type="button">2D</button><button id="m3d" type="button">3D</button></div>
+</header>
+
+<div class="app">
+  <div class="stage">
+    <div class="canvaswrap">
+      <canvas id="cv" tabindex="0" aria-label="Vertex plotting area"></canvas>
+      <div class="tools">
+        <div class="grp"><button id="undo" type="button" title="Ctrl+Z">Undo</button><button id="redo" type="button" title="Ctrl+Y">Redo</button></div>
+        <div class="grp"><button id="zout" type="button" aria-label="Zoom out">−</button><button id="zin" type="button" aria-label="Zoom in">+</button><button id="fit" type="button">Fit</button></div>
+        <div class="grp"><button id="example" type="button">Example</button><button id="clearAll" type="button">Clear all</button></div>
+      </div>
+      <div class="tag" id="tag"></div>
+      <div class="toast" id="toast"></div>
+    </div>
+    <div class="readout">
+      <span><b>Cursor</b><span id="rCur">—</span></span>
+      <span><b>Snapped</b><span id="rSnap">—</span></span>
+      <span><b>Selected</b><span id="rSel">none</span></span>
+    </div>
+    <p class="hint"><b>Click empty space</b> adds a vertex · <b>click a vertex</b> reuses it in the next triangle · <kbd>Shift</kbd>+click adds a vertex without using it · <kbd>Ctrl</kbd>+click selects a triangle · <b>drag</b> a vertex to move it, empty space to pan · <b>scroll</b> zooms · <b>right-click</b> or <kbd>Del</kbd> deletes · <kbd>Alt</kbd> skips snapping</p>
+  </div>
+
+  <div class="rail">
+    <div class="tabs" role="tablist">
+      <button id="t-build" class="on" data-tab="build" role="tab" type="button">Build</button>
+      <button id="t-colors" data-tab="colors" role="tab" type="button">Colors</button>
+      <button id="t-verts" data-tab="verts" role="tab" type="button">Vertices</button>
+      <button id="t-code" data-tab="code" role="tab" type="button">Code</button>
+    </div>
+
+    <div class="tab" id="p-build">
+      <div class="sec">
+        <h2>Placement</h2>
+        <div class="row"><div class="seg" role="group" aria-label="Click behavior"><button id="modeBuild" class="on" type="button">Build shape</button><button id="modeSel" type="button">Select only</button></div></div>
+        <div class="row">
+          <label><input type="checkbox" id="snapOn" checked> Snap to grid</label>
+          <select id="snapStep" aria-label="Snap step"><option>0.05</option><option selected>0.1</option><option>0.25</option><option>0.5</option></select>
+        </div>
+        <div class="row" id="planeRow" hidden>
+          <label>Plane <select id="plane"><option value="xy">XY</option><option value="xz">XZ</option><option value="yz">YZ</option></select></label>
+          <label><span id="depthLbl">z</span> <input type="number" id="depth" value="0" step="0.1" min="-1" max="1" style="width:78px"></label>
+        </div>
+        <div class="row"><label><input type="checkbox" id="showCoords" checked> Show coordinates</label><label><input type="checkbox" id="showNums" checked> Show triangle numbers</label></div>
+      </div>
+      <div class="sec">
+        <h2>Shape</h2>
+        <div class="row">
+          <label>Primitive
+            <select id="prim"><option>POINTS</option><option>LINES</option><option>LINE_STRIP</option><option>LINE_LOOP</option><option selected>TRIANGLES</option><option>TRIANGLE_STRIP</option><option>TRIANGLE_FAN</option></select>
+          </label>
+          <label><input type="checkbox" id="fillOn" checked> Fill</label>
+        </div>
+        <label for="idxText" style="font-size:12px;color:var(--muted)">Index list (vertex numbers in draw order)</label>
+        <input type="text" id="idxText" spellcheck="false">
+        <div class="row"><button id="rmLast" type="button">Remove last</button><button id="clrShape" type="button">Clear shape</button></div>
+      </div>
+    </div>
+
+    <div class="tab" id="p-colors" hidden>
+      <div class="sec">
+        <h2>Color for new triangles</h2>
+        <div class="row">
+          <input type="color" id="newPick" aria-label="New primitive color">
+          <input type="text" id="newRgb" spellcheck="false" style="flex:1;min-width:140px" aria-label="New color as RGB 0 to 1" placeholder="0.73, 0.56, 0.79">
+        </div>
+        <div class="presets" id="presets" aria-label="Preset colors"></div>
+        <div class="row"><button id="paintSel" type="button">Paint selected</button><button id="paintAll" type="button">Paint all</button><button id="randAll" type="button">Random pastels</button></div>
+        <p class="note">Type RGB values from 0 to 1, like <code>0.73, 0.56, 0.79</code>. Values above 1 are read as 0 to 255, and <code>#rrggbb</code> works too.</p>
+      </div>
+      <div class="sec">
+        <h2>Colors per triangle</h2>
+        <div class="clist" id="clist"></div>
+      </div>
+    </div>
+
+    <div class="tab" id="p-verts" hidden>
+      <div class="sec">
+        <h2>Vertices</h2>
+        <div class="tablewrap"><table><thead><tr><th>#</th><th>x</th><th>y</th><th>z</th><th>use</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="tab" id="p-code" hidden>
+      <div class="sec">
+        <h2>Import</h2>
+        <textarea id="imp" spellcheck="false" aria-label="Paste vertex array" placeholder="Paste a vertex array here, e.g.&#10;GLfloat vertices[] = { -0.5f, -0.5f, 0.0f,  0.5f, -0.5f, 0.0f,  0.0f, 0.5f, 0.0f };"></textarea>
+        <div class="row">
+          <label>Values per vertex
+            <select id="stride"><option value="auto">Auto</option><option value="2">2 (x y)</option><option value="3">3 (x y z)</option><option value="5">5 (x y r g b)</option><option value="6">6 (x y z r g b)</option></select>
+          </label>
+        </div>
+        <div class="row"><button class="primary" id="impReplace" type="button">Import and replace</button><button id="impAppend" type="button">Append</button></div>
+        <p class="msg" id="impMsg"></p>
+        <p class="note">Blank lines between groups are kept. A second array of the same length is read as per-vertex colors.</p>
+      </div>
+      <div class="sec">
+        <h2>Export</h2>
+        <div class="row">
+          <label>Format <select id="fmt"><option value="c">C / C++ GLfloat</option><option value="gl">glBegin / glVertex</option><option value="webgl">WebGL Float32Array</option><option value="py">Python list</option></select></label>
+        </div>
+        <div class="row">
+          <label>Colors <select id="colMode"><option value="sep">Separate array</option><option value="int">Interleaved</option><option value="none">None</option></select></label>
+          <label>Layout <select id="layout"><option value="exp">As drawn</option><option value="idx">Indexed</option></select></label>
+        </div>
+        <div class="row">
+          <label>Components <select id="comps"><option value="3">x y z</option><option value="2">x y</option></select></label>
+          <label>Decimals <select id="dec"><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select></label>
+        </div>
+        <textarea id="out" readonly spellcheck="false" aria-label="Exported code" style="min-height:220px"></textarea>
+        <div class="row"><button class="primary" id="copy" type="button">Copy code</button></div>
+        <p class="note">Indexed layout needs colors set to None, since a shared vertex can sit in triangles of different colors.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const cv=$('cv'), ctx=cv.getContext('2d');
+  const PAL=[[.73,.56,.79],[.36,.72,.85],[.96,.62,.39],[.53,.80,.52],[.93,.42,.52],[.96,.82,.40]];
+  const SAMPLE=`GLfloat vertices[] =
+{ -0.228f,  0.632f, 0.0f,   -0.478f,  0.000f, 0.0f,    0.000f,  0.000f, 0.0f,
+
+  -0.399f,  0.000f, 0.0f,    0.000f,  0.000f, 0.0f,    0.000f, -0.562f, 0.0f,
+  -0.399f,  0.000f, 0.0f,    0.000f, -0.562f, 0.0f,   -0.399f, -0.562f, 0.0f,
+
+  -0.082f,  0.885f, 0.0f,    0.272f,  0.000f, 0.0f,    0.031f,  0.000f, 0.0f,
+  -0.082f,  0.885f, 0.0f,    0.031f,  0.000f, 0.0f,   -0.190f,  0.623f, 0.0f,
+
+   0.034f, -0.052f, 0.0f,    0.197f, -0.052f, 0.0f,    0.197f, -0.562f, 0.0f,
+   0.034f, -0.052f, 0.0f,    0.197f, -0.562f, 0.0f,    0.034f, -0.562f, 0.0f };`;
+  const S={verts:[],idx:[],colors:[],breaks:[],prim:'TRIANGLES',dim:2,plane:'xy',depth:0,sel:-1,selG:-1,build:true,
+           snap:true,step:0.1,view:{cx:0,cy:0,s:200},cur:null,newColor:[.73,.56,.79]};
+  let hist=[],redo=[],W=0,H=0,dpr=1,idxFocus=false;
+
+  const AX={xy:['x','y','z'],xz:['x','z','y'],yz:['y','z','x']};
+  const ax=()=>S.dim===2?AX.xy:AX[S.plane];
+  const proj=v=>{const a=ax();return [v[a[0]],v[a[1]]]};
+  const toScr=(u,w)=>[W/2+(u-S.view.cx)*S.view.s, H/2-(w-S.view.cy)*S.view.s];
+  const toWorld=(px,py)=>[(px-W/2)/S.view.s+S.view.cx, -(py-H/2)/S.view.s+S.view.cy];
+  const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const fmt=(n,d=3)=>{const t=n.toFixed(d);return t==='-'+(0).toFixed(d)?(0).toFixed(d):t};
+  const clean=n=>Math.round(n*1e6)/1e6;
+  const snapV=(v,alt)=>S.snap&&!alt?Math.round(v/S.step)*S.step:v;
+  const rgbCss=(c,a)=>'rgba('+c.map(x=>Math.round(x*255)).join(',')+','+(a==null?1:a)+')';
+  const toHex=c=>'#'+c.map(x=>Math.round(Math.max(0,Math.min(1,x))*255).toString(16).padStart(2,'0')).join('');
+  const fromHex=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)/255);
+  const cTxt=c=>c.map(x=>String(parseFloat(x.toFixed(3)))).join(', ');
+  function parseRGB(s){
+    s=s.trim().replace(/\.{2,}/g,'.');
+    if(/^#[0-9a-f]{6}$/i.test(s))return fromHex(s);
+    const n=(s.match(/[-+]?(?:\d+\.?\d*|\.\d+)/g)||[]).map(parseFloat);
+    if(n.length<3)return null;
+    let c=n.slice(0,3);
+    if(c.some(x=>x>1))c=c.map(x=>x/255);
+    return c.map(x=>Math.max(0,Math.min(1,x)));
+  }
+
+  /* ---------- geometry ---------- */
+  function gpos(){
+    const n=S.idx.length,g=[];
+    switch(S.prim){
+      case 'POINTS':for(let i=0;i<n;i++)g.push([i]);break;
+      case 'LINES':for(let i=0;i+1<n;i+=2)g.push([i,i+1]);break;
+      case 'LINE_STRIP':for(let i=0;i+1<n;i++)g.push([i,i+1]);break;
+      case 'LINE_LOOP':for(let i=0;i+1<n;i++)g.push([i,i+1]);if(n>2)g.push([n-1,0]);break;
+      case 'TRIANGLES':for(let i=0;i+2<n;i+=3)g.push([i,i+1,i+2]);break;
+      case 'TRIANGLE_STRIP':for(let i=0;i+2<n;i++)g.push(i%2?[i+1,i,i+2]:[i,i+1,i+2]);break;
+      case 'TRIANGLE_FAN':for(let i=1;i+1<n;i++)g.push([0,i,i+1]);break;
+    }
+    return g;
+  }
+  const groups=()=>gpos().map(a=>a.map(p=>S.idx[p]));
+  function groupOfPos(p){
+    const t=S.prim;
+    if(t==='POINTS')return p;
+    if(t==='LINES')return Math.floor(p/2);
+    if(t==='TRIANGLES')return Math.floor(p/3);
+    if(t==='LINE_STRIP'||t==='LINE_LOOP')return p===0?0:p-1;
+    return p<2?0:p-2;
+  }
+  function posOfGroup(g){
+    const t=S.prim;
+    if(t==='POINTS')return g;
+    if(t==='LINES')return g*2;
+    if(t==='TRIANGLES')return g*3;
+    if(t==='LINE_STRIP'||t==='LINE_LOOP')return g+1;
+    return g+2;
+  }
+  function ensureColors(){
+    const n=gpos().length;
+    while(S.colors.length<n)S.colors.push(S.newColor.slice());
+    S.colors.length=n;
+    S.breaks=S.breaks.filter(b=>b>0&&b<n);
+    if(S.selG>=n)S.selG=-1;
+  }
+  const colorOfPos=p=>S.colors[Math.min(groupOfPos(p),S.colors.length-1)]||S.newColor;
+
+  /* ---------- history ---------- */
+  const snapshot=()=>JSON.stringify({v:S.verts,i:S.idx,c:S.colors,b:S.breaks});
+  function commit(){hist.push(snapshot());if(hist.length>200)hist.shift();redo=[]}
+  function restore(j){const o=JSON.parse(j);S.verts=o.v;S.idx=o.i;S.colors=o.c;S.breaks=o.b;if(S.sel>=S.verts.length)S.sel=-1}
+  function undo(){if(!hist.length)return;redo.push(snapshot());restore(hist.pop());refresh()}
+  function redoFn(){if(!redo.length)return;hist.push(snapshot());restore(redo.pop());refresh()}
+
+  /* ---------- canvas ---------- */
+  function resize(){
+    const r=cv.parentElement.getBoundingClientRect();dpr=window.devicePixelRatio||1;
+    W=r.width;H=r.height;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);draw();
+  }
+  function fitView(){S.view={cx:0,cy:0,s:Math.max(40,Math.min(W,H)/2.5)};readouts();draw()}
+  function zoomBy(f){S.view.s=Math.min(5000,Math.max(30,S.view.s*f));readouts();draw()}
+
+  function draw(){
+    if(!W)return;
+    ctx.clearRect(0,0,W,H);
+    const a=ax(),s=S.view.s;
+    const [u0,w1]=toWorld(0,0),[u1,w0]=toWorld(W,H);
+    let minor=0.1;while(minor*s<14)minor*=2.5;
+    const lines=(step,col)=>{
+      ctx.strokeStyle=col;ctx.lineWidth=1;ctx.beginPath();
+      for(let u=Math.ceil(u0/step)*step;u<=u1;u+=step){const [x]=toScr(u,0);ctx.moveTo(Math.round(x)+.5,0);ctx.lineTo(Math.round(x)+.5,H)}
+      for(let w=Math.ceil(w0/step)*step;w<=w1;w+=step){const [,y]=toScr(0,w);ctx.moveTo(0,Math.round(y)+.5);ctx.lineTo(W,Math.round(y)+.5)}
+      ctx.stroke();
+    };
+    lines(minor,css('--grid'));lines(0.5,css('--grid-major'));
+    const [bx0,by0]=toScr(-1,1),[bx1,by1]=toScr(1,-1);
+    ctx.strokeStyle=css('--ndc');ctx.lineWidth=1.5;ctx.setLineDash([6,4]);ctx.strokeRect(bx0,by0,bx1-bx0,by1-by0);ctx.setLineDash([]);
+    const [ox,oy]=toScr(0,0);
+    ctx.lineWidth=1.5;
+    ctx.strokeStyle=css('--axis-'+a[0]);ctx.beginPath();ctx.moveTo(0,oy);ctx.lineTo(W,oy);ctx.stroke();
+    ctx.strokeStyle=css('--axis-'+a[1]);ctx.beginPath();ctx.moveTo(ox,0);ctx.lineTo(ox,H);ctx.stroke();
+    ctx.font='500 11px '+css('--f-mono');ctx.fillStyle=css('--muted');ctx.textBaseline='top';
+    [-1,-.5,.5,1].forEach(t=>{const [x]=toScr(t,0),[,y]=toScr(0,t);
+      ctx.textAlign='center';ctx.fillText(String(t),x,oy+4);ctx.textAlign='right';ctx.fillText(String(t),ox-5,y-6)});
+    ctx.textAlign='left';ctx.font='600 12px '+css('--f-mono');
+    ctx.fillStyle=css('--axis-'+a[0]);ctx.fillText(a[0],Math.min(W-14,bx1+6),oy-18);
+    ctx.fillStyle=css('--axis-'+a[1]);ctx.fillText(a[1],ox+8,Math.max(4,by0-18));
+    ctx.font='500 11px '+css('--f-mono');ctx.fillStyle=css('--muted');ctx.fillText('0',ox+4,oy+4);
+
+    const P=k=>toScr(...proj(S.verts[k]));
+    const gs=groups(),fill=$('fillOn').checked,edge=css('--edge');
+    const tri=S.prim.startsWith('TRIANGLE');
+    gs.forEach((g,gi)=>{
+      const col=S.colors[gi]||S.newColor,p=g.map(P),on=gi===S.selG;
+      if(tri){
+        ctx.beginPath();ctx.moveTo(...p[0]);ctx.lineTo(...p[1]);ctx.lineTo(...p[2]);ctx.closePath();
+        if(fill){ctx.fillStyle=rgbCss(col,.92);ctx.fill()}
+        ctx.lineJoin='round';ctx.strokeStyle=on?css('--sel'):edge;ctx.lineWidth=on?3:1;ctx.stroke();
+      }else if(S.prim==='POINTS'){
+        ctx.beginPath();ctx.arc(p[0][0],p[0][1],on?9:7,0,7);ctx.fillStyle=rgbCss(col);ctx.fill();
+        ctx.strokeStyle=on?css('--sel'):edge;ctx.lineWidth=on?3:1;ctx.stroke();
+      }else{
+        ctx.beginPath();ctx.moveTo(...p[0]);ctx.lineTo(...p[1]);
+        if(on){ctx.strokeStyle=css('--sel');ctx.lineWidth=7;ctx.stroke()}
+        ctx.strokeStyle=rgbCss(col);ctx.lineWidth=3;ctx.lineCap='round';ctx.stroke();
+      }
+    });
+    if(tri&&$('showNums').checked){
+      ctx.font='600 11px '+css('--f-mono');ctx.textAlign='center';ctx.textBaseline='middle';
+      gs.forEach((g,gi)=>{
+        const p=g.map(P),x=(p[0][0]+p[1][0]+p[2][0])/3,y=(p[0][1]+p[1][1]+p[2][1])/3;
+        ctx.lineWidth=3;ctx.strokeStyle=css('--panel');ctx.strokeText('T'+gi,x,y);ctx.fillStyle=css('--fg');ctx.fillText('T'+gi,x,y);
+      });
+    }
+    ctx.textAlign='left';ctx.textBaseline='bottom';ctx.font='500 11px '+css('--f-mono');
+    S.verts.forEach((v,k)=>{
+      const [x,y]=P(k),isSel=k===S.sel;
+      ctx.beginPath();ctx.arc(x,y,isSel?7:4.5,0,7);
+      ctx.fillStyle=isSel?css('--sel'):css('--vert');ctx.fill();
+      ctx.lineWidth=2;ctx.strokeStyle=css('--panel');ctx.stroke();
+      if($('showCoords').checked||isSel){
+        let label='v'+k;
+        if($('showCoords').checked)label+=' ('+fmt(v[a[0]],2)+', '+fmt(v[a[1]],2)+')';
+        ctx.lineWidth=3;ctx.strokeStyle=css('--panel');ctx.strokeText(label,x+8,y-6);
+        ctx.fillStyle=css('--fg');ctx.fillText(label,x+8,y-6);
+      }
+    });
+    if(S.cur){
+      const [x,y]=toScr(...S.cur.snap);
+      ctx.strokeStyle=css('--accent');ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,y,7,0,7);ctx.stroke();
+    }
+  }
+
+  function hit(px,py){
+    for(let k=S.verts.length-1;k>=0;k--){
+      const [x,y]=toScr(...proj(S.verts[k]));
+      if(Math.hypot(x-px,y-py)<=10)return k;
+    }
+    return -1;
+  }
+  function hitGroup(px,py){
+    const gs=groups();
+    for(let gi=gs.length-1;gi>=0;gi--){
+      const p=gs[gi].map(k=>toScr(...proj(S.verts[k])));
+      if(p.length===3){
+        const sgn=(a,b,c)=>(a[0]-c[0])*(b[1]-c[1])-(b[0]-c[0])*(a[1]-c[1]);
+        const q=[px,py],d1=sgn(q,p[0],p[1]),d2=sgn(q,p[1],p[2]),d3=sgn(q,p[2],p[0]);
+        if(!((d1<0||d2<0||d3<0)&&(d1>0||d2>0||d3>0)))return gi;
+      }else if(p.length===2){
+        const [ax1,ay1]=p[0],[bx,by]=p[1],dx=bx-ax1,dy=by-ay1,l2=dx*dx+dy*dy||1;
+        const t=Math.max(0,Math.min(1,((px-ax1)*dx+(py-ay1)*dy)/l2));
+        if(Math.hypot(px-(ax1+t*dx),py-(ay1+t*dy))<8)return gi;
+      }else if(Math.hypot(px-p[0][0],py-p[0][1])<11)return gi;
+    }
+    return -1;
+  }
+  function mk(u,w){const a=ax(),v={x:0,y:0,z:0};v[a[0]]=u;v[a[1]]=w;if(S.dim===3)v[a[2]]=S.depth;return v}
+  function delVert(k){
+    S.verts.splice(k,1);
+    S.idx=S.idx.filter(i=>i!==k).map(i=>i>k?i-1:i);
+    if(S.sel===k)S.sel=-1;else if(S.sel>k)S.sel--;
+  }
+  function pushIdx(k){
+    const n0=gpos().length;S.idx.push(k);
+    const n1=gpos().length;if(n1>n0)S.selG=n1-1;
+  }
+
+  let drag=null;
+  const pos=e=>{const r=cv.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};
+  cv.addEventListener('contextmenu',e=>{
+    e.preventDefault();const [px,py]=pos(e),k=hit(px,py);
+    if(k>=0){commit();delVert(k);refresh()}
+  });
+  cv.addEventListener('pointerdown',e=>{
+    if(e.button!==0)return;cv.focus();
+    const [px,py]=pos(e);
+    if(e.ctrlKey||e.metaKey){
+      const g=hitGroup(px,py);
+      if(g>=0){S.selG=g;refresh();return}
+    }
+    cv.setPointerCapture(e.pointerId);
+    drag={px,py,k:hit(px,py),moved:false,view:{...S.view},committed:false};
+  });
+  cv.addEventListener('pointermove',e=>{
+    const [px,py]=pos(e),[u,w]=toWorld(px,py);
+    S.cur={raw:[u,w],snap:[clean(snapV(u,e.altKey)),clean(snapV(w,e.altKey))]};
+    if(drag){
+      const dx=px-drag.px,dy=py-drag.py;
+      if(!drag.moved&&Math.hypot(dx,dy)>4)drag.moved=true;
+      if(drag.moved){
+        if(drag.k>=0){
+          if(!drag.committed){commit();drag.committed=true}
+          const a=ax(),v=S.verts[drag.k];v[a[0]]=S.cur.snap[0];v[a[1]]=S.cur.snap[1];S.sel=drag.k;
+          refresh({noColors:true});
+        }else{
+          S.view.cx=drag.view.cx-dx/S.view.s;S.view.cy=drag.view.cy+dy/S.view.s;readouts();draw();
+        }
+        return;
+      }
+    }
+    readouts();draw();
+  });
+  cv.addEventListener('pointerup',e=>{
+    if(!drag)return;const d=drag;drag=null;
+    if(d.moved){refresh();return}
+    const [px,py]=pos(e);
+    if(d.k>=0){
+      S.sel=d.k;
+      if(S.build&&!e.shiftKey){commit();pushIdx(d.k)}
+    }else if(S.build||e.shiftKey){
+      const [u,w]=toWorld(px,py);
+      commit();
+      S.verts.push(mk(clean(snapV(u,e.altKey)),clean(snapV(w,e.altKey))));
+      S.sel=S.verts.length-1;
+      if(S.build&&!e.shiftKey)pushIdx(S.sel);
+    }else{
+      const g=hitGroup(px,py);S.selG=g;if(g<0)S.sel=-1;
+    }
+    refresh();
+  });
+  cv.addEventListener('pointerleave',()=>{if(!drag){S.cur=null;readouts();draw()}});
+  cv.addEventListener('wheel',e=>{
+    e.preventDefault();const [px,py]=pos(e),[u,w]=toWorld(px,py);
+    S.view.s=Math.min(5000,Math.max(30,S.view.s*Math.exp(-e.deltaY*0.0015)));
+    S.view.cx=u-(px-W/2)/S.view.s;S.view.cy=w+(py-H/2)/S.view.s;readouts();draw();
+  },{passive:false});
+  document.addEventListener('keydown',e=>{
+    const t=e.target.tagName,typing=t==='INPUT'||t==='TEXTAREA'||t==='SELECT';
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){if(typing)return;e.preventDefault();e.shiftKey?redoFn():undo();return}
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){if(typing)return;e.preventDefault();redoFn();return}
+    if((e.key==='Delete'||e.key==='Backspace')&&S.sel>=0&&!typing){e.preventDefault();commit();delVert(S.sel);refresh()}
+  });
+
+  /* ---------- UI refresh ---------- */
+  function readouts(){
+    if(S.cur){
+      $('rCur').textContent='('+fmt(S.cur.raw[0])+', '+fmt(S.cur.raw[1])+')';
+      $('rSnap').textContent='('+fmt(S.cur.snap[0])+', '+fmt(S.cur.snap[1])+')';
+    }else{$('rCur').textContent='—';$('rSnap').textContent='—'}
+    if(S.sel>=0&&S.verts[S.sel]){
+      const v=S.verts[S.sel];
+      $('rSel').textContent='v'+S.sel+' ('+fmt(v.x)+', '+fmt(v.y)+(S.dim===3?', '+fmt(v.z):'')+')';
+    }else $('rSel').textContent=S.selG>=0?'T'+S.selG:'none';
+    const a=ax();
+    $('tag').textContent=(S.dim===2?'2D · XY':'3D · '+S.plane.toUpperCase()+' · '+a[2]+' = '+fmt(S.depth,2))+' · '+Math.round(S.view.s/200*100)+'%';
+  }
+  function table(){
+    const tb=$('tb'),uses={};S.idx.forEach(k=>uses[k]=(uses[k]||0)+1);
+    tb.innerHTML='';
+    S.verts.forEach((v,k)=>{
+      const tr=document.createElement('tr');if(k===S.sel)tr.className='sel';
+      tr.innerHTML='<td>'+k+'</td>'+['x','y','z'].map(c=>'<td><input type="number" step="0.01" data-c="'+c+'" value="'+clean(v[c])+'" aria-label="v'+k+' '+c+'"></td>').join('')+'<td>'+(uses[k]||0)+'</td><td><button type="button" aria-label="Delete vertex '+k+'">✕</button></td>';
+      tr.onclick=()=>{S.sel=k;readouts();draw();[...tb.children].forEach((r,i)=>r.classList.toggle('sel',i===k))};
+      tr.querySelectorAll('input').forEach(inp=>{
+        inp.onclick=e=>e.stopPropagation();
+        inp.onchange=()=>{const x=parseFloat(inp.value);if(isNaN(x))return;commit();v[inp.dataset.c]=x;refresh()};
+      });
+      tr.querySelector('button').onclick=ev=>{ev.stopPropagation();commit();delVert(k);refresh()};
+      tb.appendChild(tr);
+    });
+    if(!S.verts.length)tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:12px">No vertices yet. Click the graph or paste an array in Code.</td></tr>';
+  }
+  function renderColors(){
+    const box=$('clist'),gs=groups();
+    box.innerHTML='';
+    if(!gs.length){box.innerHTML='<p class="note">No triangles yet. Add vertices in Build, or paste an array in Code.</p>';return}
+    gs.forEach((g,gi)=>{
+      const col=S.colors[gi]||S.newColor;
+      const row=document.createElement('div');row.className='crow'+(gi===S.selG?' sel':'');row.id='crow'+gi;
+      row.innerHTML='<span class="chip"></span><span class="cid">'+(S.prim.startsWith('TRIANGLE')?'T':'P')+gi+'<small>'+g.map(k=>'v'+k).join(' ')+'</small></span><input type="text" spellcheck="false" aria-label="RGB of primitive '+gi+'"><input type="color" aria-label="Pick color of primitive '+gi+'">';
+      const chip=row.children[0],txt=row.children[2],pick=row.children[3];
+      chip.style.background=rgbCss(col);txt.value=cTxt(col);pick.value=toHex(col);
+      let touched=false;
+      const setCol=c=>{if(!touched){commit();touched=true}S.colors[gi]=c;chip.style.background=rgbCss(c);$('out').value=exportCode();draw()};
+      txt.oninput=()=>{const c=parseRGB(txt.value);txt.classList.toggle('bad',!c);if(c){setCol(c);pick.value=toHex(c)}};
+      txt.onfocus=()=>{touched=false};txt.onblur=()=>{txt.value=cTxt(S.colors[gi]||S.newColor);txt.classList.remove('bad')};
+      pick.oninput=()=>{const c=fromHex(pick.value);setCol(c);txt.value=cTxt(c)};
+      pick.onfocus=()=>{touched=false};
+      row.onclick=e=>{if(e.target.tagName==='INPUT')return;S.selG=gi;readouts();draw();[...box.children].forEach((r,i)=>r.classList.toggle('sel',i===gi))};
+      txt.addEventListener('focus',()=>{S.selG=gi;[...box.children].forEach((r,i)=>r.classList.toggle('sel',i===gi));draw()});
+      box.appendChild(row);
+    });
+    if(S.selG>=0){const r=$('crow'+S.selG);if(r&&!$('p-colors').hidden)r.scrollIntoView({block:'nearest'})}
+  }
+  function refresh(o){
+    o=o||{};ensureColors();readouts();draw();
+    if(!o.noTable)table();
+    if(!o.noColors)renderColors();
+    if(!idxFocus)$('idxText').value=S.idx.join(', ');
+    $('newPick').value=toHex(S.newColor);
+    if(document.activeElement!==$('newRgb'))$('newRgb').value=cTxt(S.newColor);
+    $('out').value=exportCode();
+    $('undo').disabled=!hist.length;$('redo').disabled=!redo.length;
+  }
+  function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1500)}
+
+  /* ---------- export ---------- */
+  function exportCode(){
+    const d=+$('dec').value,f=$('fmt').value,comps=+$('comps').value,colMode=$('colMode').value;
+    let layout=$('layout').value;
+    if(!S.verts.length)return '// Click the graph or paste vertices to begin.';
+    const isC=f==='c'||f==='gl',cs=['x','y','z'].slice(0,comps);
+    const nf=x=>(fmt(x,d)+(isC?'f':'')).padStart(d+3+(isC?1:0));
+    const cf=x=>{let t=String(parseFloat(x.toFixed(4)));if(!t.includes('.'))t+='.0';return t+(isC?'f':'')};
+    const vstr=k=>cs.map(c=>nf(S.verts[k][c])).join(', ');
+    const cstr=p=>colorOfPos(p).map(cf).join(', ');
+    const step=({TRIANGLES:3,LINES:2})[S.prim]||1,tri=S.prim==='TRIANGLES';
+    const glName='GL_'+S.prim,n=S.idx.length;
+    if(colMode!=='none')layout='exp';
+    function block(items,ind){
+      const lines=[];
+      for(let p=0;p<items.length;p+=step){
+        if(tri&&p>0&&S.breaks.includes(p/3))lines.push('');
+        lines.push(ind+items.slice(p,p+step).join(',   ')+',');
+      }
+      if(lines.length)lines[lines.length-1]=lines[lines.length-1].replace(/,$/,'');
+      return lines.join('\n');
+    }
+    const posItems=S.idx.map(k=>vstr(k)),colItems=S.idx.map((k,p)=>cstr(p));
+    const intItems=S.idx.map((k,p)=>vstr(k)+',   '+cstr(p));
+    const call=n+' vertices';
+    if(f==='gl'){
+      let o='glBegin('+glName+');\n',last='';
+      S.idx.forEach((k,p)=>{
+        if(colMode!=='none'){const c=cstr(p);if(c!==last){o+='  glColor3f('+c+');\n';last=c}}
+        o+='  glVertex'+comps+'f('+cs.map(c=>fmt(S.verts[k][c],d)+'f').join(', ')+');\n';
+      });
+      return o+'glEnd();';
+    }
+    if(layout==='idx'){
+      const rows=S.verts.map((v,k)=>cs.map(c=>nf(v[c])).join(', '));
+      const ib=[];for(let i=0;i<n;i+=step)ib.push('  '+S.idx.slice(i,i+step).join(', '));
+      if(f==='c')return 'GLfloat vertices[] =\n{ '+rows.map(r=>r).join(',\n  ')+' };\n\nGLuint indices[] =\n{ '+ib.join(',\n  ').slice(2)+' };\n\n// glDrawElements('+glName+', '+n+', GL_UNSIGNED_INT, 0);';
+      if(f==='webgl')return 'const vertices = new Float32Array([\n'+rows.map(r=>'  '+r).join(',\n')+'\n]);\n\nconst indices = new Uint16Array([\n'+ib.join(',\n')+'\n]);\n\n// gl.drawElements(gl.'+S.prim+', '+n+', gl.UNSIGNED_SHORT, 0);';
+      return 'vertices = [\n'+rows.map(r=>'    ('+r+'),').join('\n')+'\n]\nindices = ['+S.idx.join(', ')+']\n# primitive: '+glName;
+    }
+    if(f==='c'){
+      const arr=(name,items)=>'GLfloat '+name+'[] =\n{ '+block(items,'  ').slice(2)+' };';
+      let o=colMode==='int'?arr('vertices',intItems):arr('vertices',posItems);
+      if(colMode==='sep')o+='\n\n'+arr('colors',colItems);
+      return o+'\n\n// glDrawArrays('+glName+', 0, '+n+');';
+    }
+    if(f==='webgl'){
+      const arr=(name,items)=>'const '+name+' = new Float32Array([\n'+block(items,'  ')+'\n]);';
+      let o=colMode==='int'?arr('vertexData',intItems)+'\n// stride: '+(comps+3)+' floats (position then rgb)':arr('vertices',posItems);
+      if(colMode==='sep')o+='\n\n'+arr('colors',colItems);
+      return o+'\n\n// gl.drawArrays(gl.'+S.prim+', 0, '+n+');';
+    }
+    const pl=(name,items)=>name+' = [\n'+items.map(it=>'    ('+it+'),').join('\n')+'\n]';
+    let o=colMode==='int'?pl('vertex_data',intItems):pl('vertices',posItems);
+    if(colMode==='sep')o+='\n'+pl('colors',colItems);
+    return o+'\n# primitive: '+glName+', '+call;
+  }
+
+  /* ---------- import ---------- */
+  function doImport(text,append){
+    const msg=$('impMsg');msg.className='msg';
+    const src=text.replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/.*$/gm,'');
+    let blocks=[...src.matchAll(/\{([^{}]*)\}/g)].map(m=>m[1]);
+    if(!blocks.length)blocks=[...src.matchAll(/\[([^\[\]]*)\]/g)].map(m=>m[1]);
+    if(!blocks.length)blocks=[src];
+    const re=/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
+    const scan=b=>{const nums=[],brk=[];
+      b.split('\n').forEach(line=>{
+        if(!line.trim()){if(nums.length&&brk[brk.length-1]!==nums.length)brk.push(nums.length);return}
+        (line.match(re)||[]).forEach(x=>nums.push(parseFloat(x)));
+      });return {nums,brk}};
+    const vb=scan(blocks[0]),nums=vb.nums;
+    if(!nums.length){msg.className='msg bad';msg.textContent='No numbers found. Paste an array like { -0.5f, 0.0f, 0.0f, ... }.';return}
+    const sel=$('stride').value;
+    let stride=sel==='auto'?(nums.length%3===0?3:(nums.length%2===0?2:0)):+sel;
+    if(!stride||nums.length%stride!==0){msg.className='msg bad';msg.textContent=nums.length+' numbers do not split evenly into '+(stride||'3 or 2')+' per vertex. Change "Values per vertex".';return}
+    const posN=stride===5?2:stride===6?3:stride,hasCol=stride>=5,count=nums.length/stride;
+    let colData=null;
+    if(hasCol)colData=Array.from({length:count},(_,i)=>nums.slice(i*stride+posN,i*stride+posN+3));
+    else if(blocks[1]){const cb=scan(blocks[1]).nums;if(cb.length===count*3)colData=Array.from({length:count},(_,i)=>cb.slice(i*3,i*3+3).map(x=>x>1?x/255:x))}
+    commit();
+    if(!append){S.verts=[];S.idx=[];S.colors=[];S.breaks=[];S.sel=-1;S.selG=-1}
+    const po=S.idx.length,g0=gpos().length;
+    const key=v=>Math.round(v.x*1e5)+','+Math.round(v.y*1e5)+','+Math.round(v.z*1e5);
+    const map=new Map();S.verts.forEach((v,k)=>map.set(key(v),k));
+    let zNon=false;
+    for(let i=0;i<count;i++){
+      const b=i*stride,v={x:nums[b],y:nums[b+1],z:posN>=3?nums[b+2]:0};
+      if(Math.abs(v.z)>1e-9)zNon=true;
+      const kk=key(v);let id=map.get(kk);
+      if(id===undefined){id=S.verts.length;S.verts.push(v);map.set(kk,id)}
+      S.idx.push(id);
+    }
+    ensureColors();
+    const stepN=({TRIANGLES:3,LINES:2,POINTS:1})[S.prim];
+    const newBreaks=[];
+    if(stepN)vb.brk.forEach(b=>{const p=b/stride;if(p%stepN===0)newBreaks.push((po+p)/stepN)});
+    S.breaks=S.breaks.concat(newBreaks);
+    const gn=gpos().length;
+    for(let g=g0;g<gn;g++){
+      if(colData){S.colors[g]=colData[Math.min(count-1,Math.max(0,posOfGroup(g-g0)))].slice()}
+      else if(newBreaks.length){const sid=newBreaks.filter(b=>b<=g).length;S.colors[g]=PAL[sid%PAL.length].slice()}
+    }
+    if(zNon&&S.dim===2)setDim(3);
+    S.selG=-1;fitView();refresh();
+    msg.textContent=count+' vertices read, '+S.verts.length+' unique, '+(gn-g0)+' '+(S.prim.startsWith('TRIANGLE')?'triangles':'primitives')+(colData?', colors found':'')+'.';
+  }
+
+  /* ---------- controls ---------- */
+  const setSeg=(a,b,first)=>{a.classList.toggle('on',first);b.classList.toggle('on',!first)};
+  function setDim(n){S.dim=n;setSeg($('m2d'),$('m3d'),n===2);$('planeRow').hidden=n===2;$('depthLbl').textContent=ax()[2];refresh()}
+  $('m2d').onclick=()=>setDim(2);$('m3d').onclick=()=>setDim(3);
+  $('plane').onchange=e=>{S.plane=e.target.value;$('depthLbl').textContent=ax()[2];refresh()};
+  $('depth').onchange=e=>{S.depth=Math.max(-1,Math.min(1,+e.target.value||0));e.target.value=S.depth;readouts()};
+  $('modeBuild').onclick=()=>{S.build=true;setSeg($('modeBuild'),$('modeSel'),true)};
+  $('modeSel').onclick=()=>{S.build=false;setSeg($('modeBuild'),$('modeSel'),false)};
+  $('snapOn').onchange=e=>S.snap=e.target.checked;
+  $('snapStep').onchange=e=>S.step=+e.target.value;
+  ['showCoords','showNums','fillOn'].forEach(i=>$(i).onchange=draw);
+  $('prim').onchange=e=>{S.prim=e.target.value;S.colors=[];S.breaks=[];refresh()};
+  $('rmLast').onclick=()=>{if(S.idx.length){commit();S.idx.pop();refresh()}};
+  $('clrShape').onclick=()=>{if(S.idx.length){commit();S.idx=[];S.colors=[];S.breaks=[];refresh()}};
+  $('idxText').onfocus=()=>idxFocus=true;
+  $('idxText').onblur=()=>{idxFocus=false;$('idxText').value=S.idx.join(', ')};
+  $('idxText').oninput=e=>{
+    const n=e.target.value.split(/[\s,]+/).filter(Boolean).map(Number);
+    if(n.every(x=>Number.isInteger(x)&&x>=0&&x<S.verts.length)){commit();S.idx=n;refresh({noTable:true})}
+  };
+  $('undo').onclick=undo;$('redo').onclick=redoFn;$('fit').onclick=fitView;
+  $('zin').onclick=()=>zoomBy(1.25);$('zout').onclick=()=>zoomBy(.8);
+  $('clearAll').onclick=()=>{if(S.verts.length){commit();S.verts=[];S.idx=[];S.colors=[];S.breaks=[];S.sel=-1;S.selG=-1;refresh()}};
+  $('example').onclick=()=>{S.prim='TRIANGLES';$('prim').value='TRIANGLES';$('imp').value=SAMPLE;$('stride').value='auto';doImport(SAMPLE,false)};
+  ['fmt','dec','comps','colMode','layout'].forEach(i=>$(i).onchange=()=>$('out').value=exportCode());
+  $('copy').onclick=()=>{
+    const t=$('out').value,fb=()=>{$('out').select();toast('Selected. Press Ctrl+C')};
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(()=>toast('Copied'),fb);else fb();
+  };
+  $('impReplace').onclick=()=>doImport($('imp').value,false);
+  $('impAppend').onclick=()=>doImport($('imp').value,true);
+
+  // colors tab
+  const pres=$('presets');
+  [...PAL,[1,1,1],[.1,.1,.1],[.9,.2,.2],[.2,.5,.95]].forEach(c=>{
+    const b=document.createElement('button');b.type='button';b.style.background=rgbCss(c);b.title=cTxt(c);b.setAttribute('aria-label','Use color '+cTxt(c));
+    b.onclick=()=>{S.newColor=c.slice();refresh({noColors:true})};pres.appendChild(b);
+  });
+  $('newPick').oninput=e=>{S.newColor=fromHex(e.target.value);refresh({noColors:true})};
+  $('newRgb').oninput=e=>{const c=parseRGB(e.target.value);e.target.style.borderColor=c?'':'var(--bad)';if(c){S.newColor=c;$('newPick').value=toHex(c);$('out').value=exportCode()}};
+  $('newRgb').onblur=e=>{e.target.style.borderColor='';e.target.value=cTxt(S.newColor)};
+  $('paintSel').onclick=()=>{if(S.selG<0){toast('Select a triangle first');return}commit();S.colors[S.selG]=S.newColor.slice();refresh()};
+  $('paintAll').onclick=()=>{if(!S.colors.length)return;commit();S.colors=S.colors.map(()=>S.newColor.slice());refresh()};
+  $('randAll').onclick=()=>{if(!S.colors.length)return;commit();
+    S.colors=S.colors.map(()=>{const h=Math.random()*360;return hsl(h,.55,.72)});refresh()};
+  function hsl(h,s,l){const a=s*Math.min(l,1-l),f=n=>{const k=(n+h/30)%12;return l-a*Math.max(-1,Math.min(k-3,9-k,1))};return [f(0),f(8),f(4)].map(x=>parseFloat(x.toFixed(2)))}
+
+  // tabs
+  const TABS=['build','colors','verts','code'];
+  function showTab(t){TABS.forEach(x=>{$('p-'+x).hidden=x!==t;$('t-'+x).classList.toggle('on',x===t);$('t-'+x).setAttribute('aria-selected',x===t)});if(t==='colors')renderColors()}
+  document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+
+  new ResizeObserver(resize).observe(cv.parentElement);
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
+  new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+  $('imp').value=SAMPLE;
+  resize();fitView();
+  doImport(SAMPLE,false);
+  hist=[];redo=[];refresh();
+})();
+</script>
+
+</body></html>
